@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 *.jpg
 .idea/
+venv/
+__pycache__/
+*.pyc
+*.jpg
+.idea/
