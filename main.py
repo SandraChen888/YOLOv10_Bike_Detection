@@ -29,10 +29,10 @@ def train_model(data_yaml, epochs=100, batch_size=8, imgsz=640):
 if __name__ == "__main__":
     # 方式1：运行可视化界面（推荐）
     app = QApplication(sys.argv)
-    window = BikeDetectionUI()
-    window.show()
+    main_window = BikeDetectionUI()
+    main_window.show()
     sys.exit(app.exec_())
-
+cdcd
     # 方式2：单独运行检测+保存（注释上面，打开下面）
     # test_img = "test_bike.jpg"
     # detect_res, det_img = bike_detect(test_img)
