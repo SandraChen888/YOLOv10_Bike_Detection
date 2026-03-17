@@ -1,89 +1,133 @@
 # record_manage.py
 import pandas as pd
-import cv2
-import os
 from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-# 初始化记录保存路径
-record_dir = "save_record"
-img_save_dir = os.path.join(record_dir, "illegal_screenshots")
-excel_path = os.path.join(record_dir, "bike_illegal_record.xlsx")
-os.makedirs(img_save_dir, exist_ok=True)
+# ====================== MySQL 连接配置（和你 Navicat 一致）======================
+DB_CONFIG = {
+    "user": "root",
+    "password": "123456",  # 你设置的密码
+    "host": "localhost",
+    "port": 3306,
+    "database": "bike_violation_db"
+}
+
+# 创建数据库引擎
+engine = create_engine(
+    f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}?charset=utf8mb4"
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 
-def save_illegal_record(illegal_res, mark_img, image_name):
+# ====================== 数据库表模型（和你建的表完全对应）======================
+class ViolationRecord(Base):
+    __tablename__ = "violation_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键ID")
+    detect_time = Column(DateTime, nullable=False, comment="检测时间")
+    screenshot_path = Column(String(255), nullable=False, comment="违规截图路径")
+    violation_area = Column(String(100), nullable=False, comment="违规区域")
+    violation_type = Column(String(50), nullable=False, comment="违规类型")
+    create_time = Column(DateTime, default=datetime.now, comment="记录创建时间")
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="记录更新时间")
+
+
+# ====================== 1. 保存违规记录（兼容你原来的函数名 save_illegal_record）======================
+def save_illegal_record(screenshot_path: str, violation_area: str, violation_type: str):
     """
-    保存违规记录（Excel+截图）
-    :param illegal_res: 违规结果（来自judge_illegal）
-    :param mark_img: 标记违规后的图片
-    :param image_name: 原始图片名
-    :return: 保存状态、记录ID
+    保存一条违规记录（兼容原有函数名，避免修改main.py）
+    :param screenshot_path: 截图文件路径
+    :param violation_area: 违规区域（如：教学楼门口）
+    :param violation_type: 违规类型（如：违规停放）
     """
+    db = SessionLocal()
     try:
-        # 生成唯一记录ID（时间戳）
-        record_id = datetime.now().strftime("%Y%m%d%H%M%S")
-        # 保存违规截图
-        screenshot_name = f"{record_id}_{image_name}"
-        cv2.imwrite(os.path.join(img_save_dir, screenshot_name), mark_img)
-
-        # 整理Excel记录数据
-        excel_data = []
-        for res in illegal_res:
-            excel_data.append({
-                "记录ID": record_id,
-                "检测时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "单车编号": res["单车编号"],
-                "置信度": round(res["置信度"], 2),
-                "检测框(左上x)": res["检测框"][0],
-                "检测框(左上y)": res["检测框"][1],
-                "检测框(右下x)": res["检测框"][2],
-                "检测框(右下y)": res["检测框"][3],
-                "违规类型": res["违规类型"],
-                "重叠占比": round(res["重叠占比"], 2),
-                "违规截图": screenshot_name
-            })
-
-        # 写入Excel（追加模式，无文件则新建）
-        df = pd.DataFrame(excel_data)
-        if os.path.exists(excel_path):
-            df.to_excel(excel_path, mode="a", header=False, index=False)
-        else:
-            df.to_excel(excel_path, index=False)
-
-        return True, record_id
+        record = ViolationRecord(
+            detect_time=datetime.now(),
+            screenshot_path=screenshot_path,
+            violation_area=violation_area,
+            violation_type=violation_type
+        )
+        db.add(record)
+        db.commit()
+        print("✅ 违规记录保存成功！")
+        return True
     except Exception as e:
-        return False, str(e)
+        db.rollback()
+        print(f"❌ 保存失败：{e}")
+        return False
+    finally:
+        db.close()
 
 
-def query_record(query_cond=None):
+# ====================== 2. 按条件查询记录（兼容你原来的函数名 query_record）======================
+def query_record(start_time: datetime = None, end_time: datetime = None, violation_type: str = None):
     """
-    查询违规记录（按条件，如违规类型、时间）
-    :param query_cond: 查询条件，如{"违规类型": "人行道"}
-    :return: 查询结果（DataFrame）
+    按条件查询违规记录（兼容原有函数名，避免修改main.py）
+    :param start_time: 开始时间（可选）
+    :param end_time: 结束时间（可选）
+    :param violation_type: 违规类型（可选）
+    :return: 记录列表
     """
-    if not os.path.exists(excel_path):
-        return pd.DataFrame()
-    df = pd.read_excel(excel_path)
-    # 按条件筛选
-    if query_cond and isinstance(query_cond, dict):
-        for key, val in query_cond.items():
-            if key in df.columns:
-                df = df[df[key] == val]
-    return df
+    db = SessionLocal()
+    try:
+        query = db.query(ViolationRecord)
+        if start_time:
+            query = query.filter(ViolationRecord.detect_time >= start_time)
+        if end_time:
+            query = query.filter(ViolationRecord.detect_time <= end_time)
+        if violation_type:
+            query = query.filter(ViolationRecord.violation_type == violation_type)
+        records = query.all()
+        return records
+    finally:
+        db.close()
 
 
-# 测试代码
+# ====================== 3. 导出 Excel ======================
+def export_to_excel(save_path: str = None):
+    """
+    导出所有记录到 Excel
+    :param save_path: 保存路径（默认：违规记录_YYYYMMDDHHMMSS.xlsx）
+    """
+    if not save_path:
+        save_path = f"违规记录_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+
+    records = query_record()
+    data = []
+    for r in records:
+        data.append({
+            "ID": r.id,
+            "检测时间": r.detect_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "截图路径": r.screenshot_path,
+            "违规区域": r.violation_area,
+            "违规类型": r.violation_type,
+            "创建时间": r.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "更新时间": r.update_time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+    df = pd.DataFrame(data)
+    df.to_excel(save_path, index=False)
+    print(f"✅ Excel 已导出到：{save_path}")
+    return save_path
+
+
+# ====================== 测试代码 ======================
 if __name__ == "__main__":
-    # 模拟违规结果
-    test_illegal = [
-        {"单车编号": 1, "置信度": 0.85, "检测框": [200, 300, 300, 450], "违规类型": "人行道", "重叠占比": 0.45}]
-    test_img = cv2.imread("illegal_mark.jpg")
-    # 保存记录
-    status, rid = save_illegal_record(test_illegal, test_img, "test_bike.jpg")
-    if status:
-        print(f"记录保存成功，记录ID：{rid}")
-        # 查询记录
-        res = query_record({"违规类型": "人行道"})
-        print(f"查询结果：\n{res}")
-    else:
-        print(f"保存失败：{rid}")
+    # 测试保存
+    save_illegal_record(
+        screenshot_path="./test.jpg",
+        violation_area="教学楼门口",
+        violation_type="违规停放"
+    )
+
+    # 测试查询
+    records = query_record()
+    for r in records:
+        print(f"ID: {r.id}, 区域: {r.violation_area}, 类型: {r.violation_type}")
+
+    # 测试导出
+    export_to_excel()

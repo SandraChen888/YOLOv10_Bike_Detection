@@ -3,7 +3,8 @@ import os
 # 导入所有模块
 from detect_model import bike_detect
 from illegal_judge import judge_illegal
-from record_manage import save_illegal_record, query_record
+
+from record_manage import save_illegal_record, query_record, export_to_excel
 from ui_base import BikeDetectionUI
 import sys
 from PyQt5.QtWidgets import QApplication
@@ -32,7 +33,6 @@ if __name__ == "__main__":
     main_window = BikeDetectionUI()
     main_window.show()
     sys.exit(app.exec_())
-cdcd
     # 方式2：单独运行检测+保存（注释上面，打开下面）
     # test_img = "test_bike.jpg"
     # detect_res, det_img = bike_detect(test_img)
