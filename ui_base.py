@@ -4,11 +4,12 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSlider, QComboBox, QTextEdit,
-    QFileDialog, QSizePolicy, QFrame
+    QFileDialog, QSizePolicy, QFrame, QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QImage, QPixmap, QFont
 from ultralytics import YOLO
+from record_manage import export_current_detection_excel
 
 
 # ---------------------- 检测线程（功能不变） ----------------------
@@ -26,6 +27,7 @@ class DetectionThread(QThread):
         self.iou_thres = iou_thres
         self.is_running = True
         self.current_frame = None  # 保存当前帧用于导出
+        self.current_detections = []  # 保存当前检测结果数据（用于Excel导出）
 
     def run(self):
         try:
@@ -60,6 +62,18 @@ class DetectionThread(QThread):
                 det_frame = results[0].plot()  # 绘制检测框
                 self.current_frame = det_frame
 
+                # 保存检测结果数据（用于Excel导出）
+                self.current_detections = []
+                for box in results[0].boxes:
+                    xyxy = box.xyxy[0].cpu().numpy()
+                    self.current_detections.append({
+                        "x1": float(xyxy[0]),
+                        "y1": float(xyxy[1]),
+                        "x2": float(xyxy[2]),
+                        "y2": float(xyxy[3]),
+                        "score": float(box.conf.item())
+                    })
+
                 # 统计检测信息
                 bike_count = len(results[0].boxes)
                 infer_time = round(results[0].speed.get("inference", 0), 2)
@@ -82,6 +96,18 @@ class DetectionThread(QThread):
         results = self.model(img, conf=self.conf_thres, iou=self.iou_thres)
         det_img = results[0].plot()
         self.current_frame = det_img
+
+        # 保存检测结果数据（用于Excel导出）
+        self.current_detections = []
+        for box in results[0].boxes:
+            xyxy = box.xyxy[0].cpu().numpy()
+            self.current_detections.append({
+                "x1": float(xyxy[0]),
+                "y1": float(xyxy[1]),
+                "x2": float(xyxy[2]),
+                "y2": float(xyxy[3]),
+                "score": float(box.conf.item())
+            })
 
         bike_count = len(results[0].boxes)
         infer_time = round(results[0].speed.get("inference", 0), 2)
@@ -596,18 +622,80 @@ class BikeDetectionUI(QMainWindow):
         """更新日志"""
         self.log_display.append(msg)
 
+    # 导出按钮槽函数
+    def on_export_clicked(self):
+        try:
+            # 1. 检查是否有检测结果
+            if not hasattr(self, 'current_detect_list') or not self.current_detect_list:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.information(self, "提示", "当前未检测到自行车！")
+                return
+
+            # 2. 调用导出函数 (来自 record_manage)
+            # 注意：如果你想导出历史记录，用 export_to_excel()
+            # 如果你想导出当前帧，用 export_current_detection_excel()
+            from record_manage import export_current_detection_excel
+            from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+            # 弹出保存对话框
+            path, _ = QFileDialog.getSaveFileName(self, "导出检测结果", "", "Excel 表格 (*.xlsx)")
+            if path:
+                export_current_detection_excel(self.current_detect_list, path)
+                QMessageBox.information(self, "成功", f"Excel 已导出至：{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"导出失败：{str(e)}")
+
     def _export_result(self):
-        """导出检测结果"""
+        """导出检测结果（支持图片和Excel）"""
         if not hasattr(self.detection_thread, "current_frame") or self.detection_thread.current_frame is None:
             self.log_display.append("❌ 暂无检测结果可导出！")
             return
 
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "保存检测结果", "", "Images (*.png *.jpg *.jpeg)"
-        )
-        if save_path:
-            cv2.imwrite(save_path, self.detection_thread.current_frame)
-            self.log_display.append(f"✅ 结果已导出至：{save_path}")
+        # 弹出选择对话框
+        msg = QMessageBox(self)
+        msg.setWindowTitle("选择导出类型")
+        msg.setText("请选择导出格式：")
+        msg.setIcon(QMessageBox.Question)
+        
+        btn_image = msg.addButton("导出图片", QMessageBox.AcceptRole)
+        btn_excel = msg.addButton("导出Excel", QMessageBox.AcceptRole)
+        btn_both = msg.addButton("同时导出", QMessageBox.AcceptRole)
+        btn_cancel = msg.addButton("取消", QMessageBox.RejectRole)
+        
+        msg.exec_()
+        
+        clicked_btn = msg.clickedButton()
+        
+        if clicked_btn == btn_cancel:
+            return
+        
+        # 导出图片
+        if clicked_btn in [btn_image, btn_both]:
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "保存检测结果图片", "", "Images (*.png *.jpg *.jpeg)"
+            )
+            if save_path:
+                cv2.imwrite(save_path, self.detection_thread.current_frame)
+                self.log_display.append(f"✅ 图片已导出至：{save_path}")
+        
+        # 导出Excel
+        if clicked_btn in [btn_excel, btn_both]:
+            if not self.detection_thread.current_detections:
+                self.log_display.append("❌ 暂无检测数据可导出Excel！")
+                return
+            
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "保存检测结果Excel", "", "Excel (*.xlsx)"
+            )
+            if save_path:
+                try:
+                    result_path, count = export_current_detection_excel(
+                        self.detection_thread.current_detections, 
+                        save_path
+                    )
+                    self.log_display.append(f"✅ Excel已导出至：{result_path}，共 {count} 条记录")
+                except Exception as e:
+                    self.log_display.append(f"❌ Excel导出失败：{str(e)}")
 
 
 # 测试入口
