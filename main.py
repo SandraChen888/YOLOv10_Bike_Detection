@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import QApplication
 # 模型训练函数（后续数据集到位后，添加到这里）
 def train_model(data_yaml, epochs=100, batch_size=8, imgsz=640):
     from ultralytics import YOLO
-    model = YOLO("yolov10s.pt")
+    model = YOLO("runs/detect/train/weights/best.pt")
     # 训练模型（改data_yaml为你的数据集配置文件路径）
     results = model.train(
         data=data_yaml,

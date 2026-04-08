@@ -4,7 +4,7 @@ import cv2
 import os
 
 # 初始化YOLOv10模型（先加载官方预训练权重，后续替换为自己训练的权重）
-model = YOLO("yolov10s.pt")  # 兼顾精度和速度，适配毕设指标
+model = YOLO("runs/detect/train/weights/best.pt")  # 使用训练好的模型
 
 
 def bike_detect(image_path, conf=0.5):
