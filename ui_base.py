@@ -1,4 +1,5 @@
 import sys
+import os
 import cv2
 import numpy as np
 from datetime import datetime
@@ -650,31 +651,125 @@ class DetectionThread(QThread):
     update_frame = pyqtSignal(np.ndarray)  # 传递检测后的帧
     update_log = pyqtSignal(str)  # 传递日志信息
     update_info = pyqtSignal(dict)  # 传递检测信息
+    show_video_duration_warning = pyqtSignal(float)  # 传递视频时长警告
 
-    def __init__(self, model_path, source_type, source_path, conf_thres, iou_thres):
+    def __init__(self, model_path, source_type, source_path, conf_thres, iou_thres, camera_index=0, scene="教学楼A栋"):
         super().__init__()
         self.model = YOLO(model_path)  # 加载YOLOv10模型
         self.source_type = source_type  # image/video/camera
         self.source_path = source_path
         self.conf_thres = conf_thres
         self.iou_thres = iou_thres
+        self.camera_index = camera_index  # 摄像头索引
+        self.scene = scene  # 当前场景
         self.is_running = True
         self.current_frame = None  # 保存当前帧用于导出
         self.current_detections = []  # 保存当前检测结果数据（用于Excel导出）
+        self.batch_results = []  # 保存批量检测结果
 
     def run(self):
         try:
             # 初始化数据源
             if self.source_type == "camera":
-                cap = cv2.VideoCapture(0)  # 摄像头
+                cap = cv2.VideoCapture(self.camera_index)  # 使用指定的摄像头索引
                 if not cap.isOpened():
-                    self.update_log.emit("❌ 摄像头打开失败！")
+                    self.update_log.emit(f"❌ 摄像头 {self.camera_index} 打开失败！")
                     return
+                self.update_log.emit(f"✅ 成功打开摄像头 {self.camera_index}")
             elif self.source_type == "video":
                 cap = cv2.VideoCapture(self.source_path)
                 if not cap.isOpened():
                     self.update_log.emit(f"❌ 视频文件打开失败：{self.source_path}")
                     return
+                
+                # 检查视频时长是否超过5分钟（300秒）
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if fps > 0:
+                    duration = frame_count / fps  # 视频时长（秒）
+                    if duration > 300:  # 5分钟 = 300秒
+                        self.update_log.emit(f"⚠️ 视频时长超过5分钟（{duration:.1f}秒），建议截取片段后再检测")
+                        # 发送信号显示弹窗
+                        self.show_video_duration_warning.emit(duration)
+                        cap.release()
+                        return
+                    else:
+                        self.update_log.emit(f"✅ 视频时长：{duration:.1f}秒，符合要求（≤5分钟）")
+            elif self.source_type == "batch_image":
+                # 批量处理多张图片
+                import os
+                total_images = len(self.source_path)
+                self.update_log.emit(f"✅ 开始批量检测，共 {total_images} 张图片")
+                
+                success_count = 0
+                fail_count = 0
+                
+                for i, image_path in enumerate(self.source_path, 1):
+                    self.update_log.emit(f"🔍 检测第 {i}/{total_images} 张：{os.path.basename(image_path)}")
+                    
+                    img = cv2.imread(image_path)
+                    if img is None:
+                        self.update_log.emit(f"❌ 图片打开失败：{image_path}")
+                        fail_count += 1
+                        continue
+                    
+                    # 检测单张图片
+                    results = self.model(img, conf=self.conf_thres, iou=self.iou_thres)
+                    
+                    # 转换检测结果格式
+                    detect_res = []
+                    for box in results[0].boxes:
+                        xyxy = box.xyxy[0].cpu().numpy()
+                        detect_res.append([
+                            int(box.cls.item()),  # 类别ID
+                            float(box.conf.item()),  # 置信度
+                            int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])  # 坐标
+                        ])
+                    
+                    # 违规判断
+                    illegal_res, det_img = judge_illegal(detect_res, img, overlap_thresh=0.3, scene=self.scene)
+                    
+                    # 保存检测结果
+                    self.batch_results.append({
+                        'image_path': image_path,
+                        'detected_image': det_img,
+                        'illegal_results': illegal_res,
+                        'bicycle_count': len(detect_res)
+                    })
+                    
+                    # 发送信号更新预览
+                    self.update_frame.emit(det_img)
+                    
+                    # 保存检测记录到数据库
+                    try:
+                        from record_manage import save_detection_record
+                        import os
+                        from datetime import datetime
+                        
+                        # 保存截图
+                        screenshot_path = f"detection_screenshots/batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{i}.jpg"
+                        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+                        cv2.imwrite(screenshot_path, det_img)
+                        
+                        # 保存每条检测记录
+                        for detection in illegal_res:
+                            illegal_type = detection.get("违规类型", "合法")
+                            is_illegal = 1 if illegal_type != "合法" else 0
+                            save_detection_record(
+                                screenshot_path=screenshot_path,
+                                violation_area=self.scene,
+                                violation_type=illegal_type if is_illegal else "合法",
+                                is_illegal=is_illegal
+                            )
+                        
+                        success_count += 1
+                        self.update_log.emit(f"✅ 第 {i} 张图片检测完成")
+                    except Exception as e:
+                        self.update_log.emit(f"⚠️ 保存数据库失败：{str(e)}")
+                        fail_count += 1
+                
+                self.update_log.emit(f"📊 批量检测完成：成功 {success_count} 张，失败 {fail_count} 张")
+                return
             else:  # 单张图片
                 img = cv2.imread(self.source_path)
                 if img is None:
@@ -704,7 +799,7 @@ class DetectionThread(QThread):
                     ])
                 
                 # 违规判断
-                illegal_res, det_frame = judge_illegal(detect_res, frame, overlap_thresh=0.3)
+                illegal_res, det_frame = judge_illegal(detect_res, frame, overlap_thresh=0.3, scene=self.scene)
                 self.current_frame = det_frame
 
                 # 保存检测结果数据（用于Excel导出）
@@ -764,7 +859,7 @@ class DetectionThread(QThread):
                             is_illegal = 1 if illegal_type and illegal_type != "合法" else 0
                             save_detection_record(
                                 screenshot_path=screenshot_path,
-                                violation_area="校园",  # 这里可以根据实际场景设置
+                                violation_area=self.scene,  # 使用当前场景
                                 violation_type=illegal_type if is_illegal else "合法",
                                 is_illegal=is_illegal
                             )
@@ -794,7 +889,7 @@ class DetectionThread(QThread):
             ])
         
         # 违规判断
-        illegal_res, det_img = judge_illegal(detect_res, img, overlap_thresh=0.3)
+        illegal_res, det_img = judge_illegal(detect_res, img, overlap_thresh=0.3, scene=self.scene)
         self.current_frame = det_img
 
         # 保存检测结果数据（用于Excel导出）
@@ -845,7 +940,7 @@ class DetectionThread(QThread):
                 is_illegal = 1 if illegal_type and illegal_type != "合法" else 0
                 save_detection_record(
                     screenshot_path=screenshot_path,
-                    violation_area="校园",  # 这里可以根据实际场景设置
+                    violation_area=self.scene,  # 使用当前场景
                     violation_type=illegal_type if is_illegal else "合法",
                     is_illegal=is_illegal
                 )
@@ -873,7 +968,7 @@ class BikeDetectionUI(QMainWindow):
                 font-family: "Microsoft YaHei", Arial, sans-serif;
             }
             QWidget {
-                font-size: 16px;
+                font-size: 18px;
                 color: #333;
             }
             QLabel {
@@ -888,21 +983,21 @@ class BikeDetectionUI(QMainWindow):
             QSlider::handle:horizontal {
                 background: #4096ff;
                 border: none;
-                width: 22px;
-                height: 22px;
+                width: 24px;
+                height: 24px;
                 margin: -6px 0;
-                border-radius: 11px;
+                border-radius: 12px;
             }
             QSlider::handle:horizontal:hover {
                 background: #3088ff;
             }
             QComboBox {
-                padding: 10px 14px;
+                padding: 12px 16px;
                 border: 1px solid #dcdfe6;
                 border-radius: 8px;
                 background-color: white;
                 selection-background-color: #e8f4ff;
-                font-size: 15px;
+                font-size: 17px;
             }
             QComboBox:hover {
                 border-color: #c0c4cc;
@@ -913,9 +1008,9 @@ class BikeDetectionUI(QMainWindow):
             QTextEdit {
                 border: 1px solid #dcdfe6;
                 border-radius: 8px;
-                padding: 10px;
+                padding: 12px;
                 background-color: white;
-                font-size: 15px;
+                font-size: 17px;
                 selection-color: #000000;
                 selection-background-color: #b3d7ff;
             }
@@ -928,6 +1023,8 @@ class BikeDetectionUI(QMainWindow):
         self.detection_thread = None
         self.model_path = "runs/detect/train/weights/best.pt"  # 使用训练好的模型
         self.source_path = ""  # 数据源路径
+        self.batch_results = []  # 保存批量检测结果
+        self.current_batch_index = 0  # 当前批量检测结果索引
 
         # 初始化界面
         self._init_ui()
@@ -983,8 +1080,39 @@ class BikeDetectionUI(QMainWindow):
         left_layout.addWidget(source_label)
 
         self.source_combo = QComboBox()
-        self.source_combo.addItems(["本地图片", "本地视频", "摄像头实时"])
+        self.source_combo.addItems(["本地图片", "批量图片", "本地视频", "摄像头实时"])
+        self.source_combo.setStyleSheet("""
+            QComboBox {
+                padding: 14px 18px;
+                border: 1px solid #dcdfe6;
+                border-radius: 8px;
+                background-color: white;
+                selection-background-color: #e8f4ff;
+                font-size: 19px;
+            }
+        """)
         left_layout.addWidget(self.source_combo)
+        left_layout.addSpacing(10)
+
+        # 摄像头索引选择
+        self.camera_index_layout = QHBoxLayout()
+        camera_index_label = QLabel("摄像头索引：")
+        camera_index_label.setStyleSheet("color: #666; font-size: 17px;")
+        self.camera_index_combo = QComboBox()
+        self.camera_index_combo.addItems(["0 (默认)", "1", "2", "3"])
+        self.camera_index_combo.setStyleSheet("""
+            QComboBox {
+                padding: 14px 18px;
+                border: 1px solid #dcdfe6;
+                border-radius: 8px;
+                background-color: white;
+                selection-background-color: #e8f4ff;
+                font-size: 19px;
+            }
+        """)
+        self.camera_index_layout.addWidget(camera_index_label)
+        self.camera_index_layout.addWidget(self.camera_index_combo)
+        left_layout.addLayout(self.camera_index_layout)
         left_layout.addSpacing(10)
 
         self.select_source_btn = QPushButton("选择文件")
@@ -1009,6 +1137,41 @@ class BikeDetectionUI(QMainWindow):
         left_layout.addWidget(self.select_source_btn)
         left_layout.addSpacing(30)
 
+        # 4. 场景选择
+        scene_label = QLabel("📍 场景选择")
+        scene_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 12px;
+            }
+        """)
+        left_layout.addWidget(scene_label)
+
+        self.scene_combo = QComboBox()
+        self.scene_combo.addItems([
+            "教学楼A栋",
+            "教学楼B栋",
+            "教学楼C栋",
+            "教学楼D栋",
+            "教学楼E栋",
+            "教学楼F栋",
+            "一饭堂门口"
+        ])
+        self.scene_combo.setStyleSheet("""
+            QComboBox {
+                padding: 14px 18px;
+                border: 1px solid #dcdfe6;
+                border-radius: 8px;
+                background-color: white;
+                selection-background-color: #e8f4ff;
+                font-size: 19px;
+            }
+        """)
+        left_layout.addWidget(self.scene_combo)
+        left_layout.addSpacing(30)
+
         # 3. 检测参数调节
         param_label = QLabel("⚙️ 检测参数")
         param_label.setStyleSheet("""
@@ -1025,7 +1188,7 @@ class BikeDetectionUI(QMainWindow):
         conf_layout = QHBoxLayout()
         conf_layout.setSpacing(12)
         conf_label = QLabel("置信度：")
-        conf_label.setStyleSheet("color: #666; font-size: 15px;")
+        conf_label.setStyleSheet("color: #666; font-size: 17px;")
         self.conf_slider = QSlider(Qt.Horizontal)
         self.conf_slider.setRange(0, 100)
         self.conf_slider.setValue(50)  # 默认0.5
@@ -1034,7 +1197,7 @@ class BikeDetectionUI(QMainWindow):
             QLabel {
                 color: #4096ff;
                 font-weight: 600;
-                font-size: 15px;
+                font-size: 17px;
                 min-width: 50px;
                 text-align: center;
             }
@@ -1050,7 +1213,7 @@ class BikeDetectionUI(QMainWindow):
         iou_layout = QHBoxLayout()
         iou_layout.setSpacing(12)
         iou_label = QLabel("IoU阈值：")
-        iou_label.setStyleSheet("color: #666; font-size: 15px;")
+        iou_label.setStyleSheet("color: #666; font-size: 17px;")
         self.iou_slider = QSlider(Qt.Horizontal)
         self.iou_slider.setRange(0, 100)
         self.iou_slider.setValue(45)  # 默认0.45
@@ -1059,7 +1222,7 @@ class BikeDetectionUI(QMainWindow):
             QLabel {
                 color: #4096ff;
                 font-weight: 600;
-                font-size: 15px;
+                font-size: 17px;
                 min-width: 50px;
                 text-align: center;
             }
@@ -1078,11 +1241,11 @@ class BikeDetectionUI(QMainWindow):
         # 创建统一的按钮样式
         button_style = """
             QPushButton {
-                padding: 16px 24px;
+                padding: 18px 28px;
                 border: none;
                 border-radius: 12px;
                 font-weight: 600;
-                font-size: 16px;
+                font-size: 18px;
             }
             QPushButton:hover {
                 transform: translateY(-2px);
@@ -1279,6 +1442,65 @@ class BikeDetectionUI(QMainWindow):
         right_layout.addLayout(result_title_layout)
         right_layout.addSpacing(12)
 
+        # 预览图片导航按钮
+        self.nav_layout = QHBoxLayout()
+        self.prev_btn = QPushButton("上一张")
+        self.prev_btn.setEnabled(False)
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #4096ff;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #3088ff;
+            }
+            QPushButton:disabled {
+                background-color: #c6e2ff;
+                color: #a0cfff;
+            }
+        """)
+        self.next_btn = QPushButton("下一张")
+        self.next_btn.setEnabled(False)
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #4096ff;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #3088ff;
+            }
+            QPushButton:disabled {
+                background-color: #c6e2ff;
+                color: #a0cfff;
+            }
+        """)
+        self.image_index_label = QLabel("0/0")
+        self.image_index_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                color: #666;
+                margin: 0 10px;
+            }
+        """)
+        self.nav_layout.addStretch()
+        self.nav_layout.addWidget(self.prev_btn)
+        self.nav_layout.addWidget(self.image_index_label)
+        self.nav_layout.addWidget(self.next_btn)
+        right_layout.addLayout(self.nav_layout)
+        right_layout.addSpacing(8)
+
+        # 连接导航按钮的点击事件
+        self.prev_btn.clicked.connect(self._prev_batch_image)
+        self.next_btn.clicked.connect(self._next_batch_image)
+
         self.result_display = QLabel()
         self.result_display.setStyleSheet("""
             QLabel {
@@ -1338,6 +1560,16 @@ class BikeDetectionUI(QMainWindow):
             file_path, _ = QFileDialog.getOpenFileName(
                 self, "选择图片", "", "Images (*.png *.jpg *.jpeg *.bmp)"
             )
+        elif source_type == "批量图片":
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self, "选择多张图片", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+            )
+            if file_paths:
+                self.source_path = file_paths
+                self.log_display.append(f"✅ 已选择 {len(file_paths)} 张图片")
+            else:
+                self.log_display.append("❌ 未选择任何文件")
+            return
         elif source_type == "本地视频":
             file_path, _ = QFileDialog.getOpenFileName(
                 self, "选择视频", "", "Videos (*.mp4 *.avi *.mov *.mkv)"
@@ -1364,8 +1596,18 @@ class BikeDetectionUI(QMainWindow):
         # 获取参数
         conf_thres = self.conf_slider.value() / 100
         iou_thres = self.iou_slider.value() / 100
-        source_type_map = {"本地图片": "image", "本地视频": "video", "摄像头实时": "camera"}
+        source_type_map = {"本地图片": "image", "批量图片": "batch_image", "本地视频": "video", "摄像头实时": "camera"}
         source_type = source_type_map[self.source_combo.currentText()]
+
+        # 获取摄像头索引
+        camera_index = 0
+        if source_type == "camera":
+            # 从下拉框获取摄像头索引
+            camera_index_text = self.camera_index_combo.currentText()
+            camera_index = int(camera_index_text.split()[0])
+
+        # 获取当前场景
+        current_scene = self.scene_combo.currentText()
 
         # 启动检测线程
         self.detection_thread = DetectionThread(
@@ -1373,13 +1615,16 @@ class BikeDetectionUI(QMainWindow):
             source_type=source_type,
             source_path=self.source_path,
             conf_thres=conf_thres,
-            iou_thres=iou_thres
+            iou_thres=iou_thres,
+            camera_index=camera_index,
+            scene=current_scene
         )
 
         # 绑定信号
         self.detection_thread.update_frame.connect(self._update_frame)
         self.detection_thread.update_log.connect(self._update_log)
         self.detection_thread.update_info.connect(self._update_info)
+        self.detection_thread.show_video_duration_warning.connect(self._show_video_duration_warning)
         self.detection_thread.finished.connect(self._reset_btn_state)
 
         # 启动线程
@@ -1398,6 +1643,70 @@ class BikeDetectionUI(QMainWindow):
         """重置按钮状态"""
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        
+        # 批量检测完成后更新结果
+        if self.detection_thread and self.detection_thread.source_type == "batch_image":
+            self.batch_results = self.detection_thread.batch_results
+            if self.batch_results:
+                self.current_batch_index = 0
+                self._display_batch_image()
+                self.log_display.append(f"✅ 批量检测结果已加载，共 {len(self.batch_results)} 张图片")
+    
+    def _prev_batch_image(self):
+        """显示上一张批量检测图片"""
+        if self.batch_results and self.current_batch_index > 0:
+            self.current_batch_index -= 1
+            self._display_batch_image()
+    
+    def _next_batch_image(self):
+        """显示下一张批量检测图片"""
+        if self.batch_results and self.current_batch_index < len(self.batch_results) - 1:
+            self.current_batch_index += 1
+            self._display_batch_image()
+    
+    def _display_batch_image(self):
+        """显示当前批量检测图片"""
+        if not self.batch_results:
+            return
+        
+        # 更新索引标签
+        self.image_index_label.setText(f"{self.current_batch_index + 1}/{len(self.batch_results)}")
+        
+        # 更新导航按钮状态
+        self.prev_btn.setEnabled(self.current_batch_index > 0)
+        self.next_btn.setEnabled(self.current_batch_index < len(self.batch_results) - 1)
+        
+        # 显示当前图片
+        result = self.batch_results[self.current_batch_index]
+        frame = result['detected_image']
+        
+        # 转换为 QImage
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        qt_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        
+        # 显示图片，保持原始比例
+        display_size = self.result_display.size()
+        pixmap = QPixmap.fromImage(qt_img).scaled(
+            display_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        self.result_display.setFixedSize(display_size)
+        self.result_display.setPixmap(pixmap)
+        
+        # 更新检测信息
+        bicycle_count = result['bicycle_count']
+        self.info_panel.setText(f"自行车数量：{bicycle_count} 辆\n检测结果：{len(result['illegal_results'])} 个")
+    
+    def _show_video_duration_warning(self, duration):
+        """显示视频时长警告弹窗"""
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            self,
+            "视频时长警告",
+            f"视频时长为 {duration:.1f} 秒，超过了5分钟的限制。\n\n建议截取5分钟以内的片段后再进行检测。",
+            QMessageBox.Ok
+        )
 
     def _update_frame(self, frame):
         """更新检测帧到界面"""
@@ -1407,10 +1716,13 @@ class BikeDetectionUI(QMainWindow):
         bytes_per_line = ch * w
         qt_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
-        # 缩放适配显示区域
+        # 使用固定大小缩放（防止循环放大）
+        display_size = self.result_display.size()
         pixmap = QPixmap.fromImage(qt_img).scaled(
-            self.result_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            display_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
+        # 保持QLabel大小固定
+        self.result_display.setFixedSize(display_size)
         self.result_display.setPixmap(pixmap)
 
     def _update_info(self, info):

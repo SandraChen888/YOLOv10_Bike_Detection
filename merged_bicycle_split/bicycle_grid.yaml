@@ -1,0 +1,9 @@
+path: F:/YOLOv10_Bike_Detection/merged_bicycle_split
+train: train/images
+val: val/images
+test: test/images
+
+nc: 2  # 类别数
+names:
+  0: bike
+  1: yellow_grid

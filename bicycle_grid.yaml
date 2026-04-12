@@ -1,0 +1,9 @@
+path: F:\dataset\merged_bicycle_split
+train: train/images
+val: val/images
+test: test/images
+
+nc: 2
+names:
+  0: bike
+  1: yellow_grid

@@ -3,8 +3,20 @@ from ultralytics import YOLO
 import cv2
 import os
 
-# 初始化YOLOv10模型（先加载官方预训练权重，后续替换为自己训练的权重）
-model = YOLO("runs/detect/train/weights/best.pt")  # 使用训练好的模型
+# 初始化YOLOv10模型（使用新训练的train_new模型，支持自行车和黄格子检测）
+model = YOLO("runs/detect/train_new/weights/best.pt")  # 使用新训练的模型
+
+# 类别名称映射
+class_names = {
+    0: "bicycle",
+    1: "yellow_grid"
+}
+
+# 类别颜色映射
+class_colors = {
+    0: (0, 0, 255),  # 自行车：红色
+    1: (0, 255, 255)  # 黄格子：黄色
+}
 
 
 def bike_detect(image_path, conf=0.5):
@@ -19,8 +31,8 @@ def bike_detect(image_path, conf=0.5):
     if img is None:
         raise Exception(f"图片路径错误，无法读取：{image_path}")
 
-    # 执行检测（只检测自行车：COCO中bicycle的类别id是1，后续自己训练后改0）
-    results = model(img, classes=[1], conf=conf)  # 临时用COCO的bikeid，自己训练后改为classes=[0]
+    # 执行检测（检测所有类别：自行车和黄格子）
+    results = model(img, conf=conf)
 
     # 解析检测结果
     detect_res = []
@@ -29,10 +41,15 @@ def bike_detect(image_path, conf=0.5):
         conf = float(res.conf.cpu().numpy()[0])  # 置信度
         x1, y1, x2, y2 = map(int, res.xyxy.cpu().numpy()[0])  # 检测框左上角/右下角坐标
         detect_res.append([cls_id, conf, x1, y1, x2, y2])
-        # 画检测框（红色，线宽2）
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        # 标注置信度
-        cv2.putText(img, f"bike {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        
+        # 获取类别名称和颜色
+        class_name = class_names.get(cls_id, f"class_{cls_id}")
+        color = class_colors.get(cls_id, (255, 255, 255))
+        
+        # 画检测框
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+        # 标注类别和置信度
+        cv2.putText(img, f"{class_name} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
     return detect_res, img
 
