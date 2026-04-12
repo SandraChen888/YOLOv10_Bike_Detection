@@ -3,8 +3,8 @@ from ultralytics import YOLO
 import cv2
 import os
 
-# 初始化YOLOv10模型（使用新训练的train_new模型，支持自行车和黄格子检测）
-model = YOLO("runs/detect/train_new/weights/best.pt")  # 使用新训练的模型
+# 初始化YOLOv10模型（使用新训练的模型，支持自行车和黄格子检测）
+model = YOLO("F:\\YOLOv10_Bike_Detection\\merged_bicycle_split\\runs\\detect\\bike_yellow_grid_300e\\weights\\best.pt")  # 使用最新训练的模型
 
 # 类别名称映射
 class_names = {

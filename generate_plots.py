@@ -1,8 +1,7 @@
 from ultralytics.utils.plotting import plot_results
 import os
 
-# 👇 这里改成你自己的results.csv路径，就是你train6文件夹里的那个
-csv_path = r"F:\YOLOv10_Bike_Detection\runs\detect\train6\results.csv"
+csv_path = r"F:/YOLOv10_Bike_Detection/merged_bicycle_split/runs/detect/bike_yellow_grid_300e/results.csv"
 
 # 调用YOLO原生绘图函数，生成和官方完全一致的10子图
 plot_results(csv_path)

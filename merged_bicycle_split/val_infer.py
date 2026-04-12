@@ -38,7 +38,7 @@ if __name__ == '__main__':
         source=TEST_IMG_PATH,
         imgsz=640,
         device=0,
-        save=True,
+        save=True,git
         conf=0.25,
         project=os.path.join(BASE_DIR, "runs"),
         name="test_result"

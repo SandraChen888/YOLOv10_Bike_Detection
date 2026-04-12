@@ -67,9 +67,14 @@ def save_detection_record(screenshot_path, violation_area, violation_type, is_il
 
 
 # 兼容旧函数名
-def save_illegal_record(screenshot_path, violation_area, violation_type):
+def save_illegal_record(illegal_res, mark_img, screenshot_path, violation_area):
     """保存违规记录（兼容旧代码）"""
-    return save_detection_record(screenshot_path, violation_area, violation_type, is_illegal=1)
+    # 提取违规类型
+    violation_type = "违规" if illegal_res else "合法"
+    # 保存记录
+    save_status = save_detection_record(screenshot_path, violation_area, violation_type, is_illegal=1)
+    # 返回状态和结果
+    return save_status, f"保存成功：{screenshot_path}"
 
 # ====================== 2. 查询历史记录（增强版） ======================
 def query_record(start_time=None, end_time=None, violation_type=None, violation_area=None, is_illegal=None):
