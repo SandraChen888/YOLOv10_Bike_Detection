@@ -1,6 +1,6 @@
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -19,10 +19,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 自动创建表结构
-Base.metadata.create_all(bind=engine)
-print("✅ 数据库表结构已创建")
-
 # ====================== 数据表模型 ======================
 class ViolationRecord(Base):
     __tablename__ = "violation_records"
@@ -31,18 +27,35 @@ class ViolationRecord(Base):
     detect_time = Column(DateTime, nullable=False)
     screenshot_path = Column(String(255), nullable=False)
     violation_area = Column(String(100), nullable=False)
-    violation_type = Column(String(50), nullable=False)
+    illegal_count = Column(Integer, nullable=False, default=0)  # 违规车辆数量
+    legal_count = Column(Integer, nullable=False, default=0)  # 合法停放车辆数量
     is_illegal = Column(Integer, nullable=False, default=1)  # 0=合法, 1=违规
     create_time = Column(DateTime, default=datetime.now)
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
+class FeedbackRecord(Base):
+    __tablename__ = "feedback_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    record_id = Column(Integer, nullable=False)  # 关联的违规记录ID
+    feedback_type = Column(String(50), nullable=False)  # 反馈类型（如"误报"、"漏报"等）
+    feedback_reason = Column(Text, nullable=True)  # 反馈原因
+    feedback_time = Column(DateTime, nullable=False, default=datetime.now)
+    create_time = Column(DateTime, default=datetime.now)
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+# 自动创建表结构
+Base.metadata.create_all(bind=engine)
+print("✅ 数据库表结构已创建")
+
 # ====================== 1. 保存检测记录 (支持合法和违规) ======================
-def save_detection_record(screenshot_path, violation_area, violation_type, is_illegal=1):
+def save_detection_record(screenshot_path, violation_area, illegal_count, legal_count, is_illegal=1):
     """
     保存检测记录（支持合法和违规）
     :param screenshot_path: 截图路径
-    :param violation_area: 检测区域（场景名称）
-    :param violation_type: 违规类型（如"合法"、"人行道"等）
+    :param violation_area: 检测区域
+    :param illegal_count: 违规车辆数量
+    :param legal_count: 合法停放车辆数量
     :param is_illegal: 是否违规（0=合法, 1=违规）
     :return: 是否保存成功
     """
@@ -52,7 +65,8 @@ def save_detection_record(screenshot_path, violation_area, violation_type, is_il
             detect_time=datetime.now(),
             screenshot_path=screenshot_path,
             violation_area=violation_area,
-            violation_type=violation_type,
+            illegal_count=illegal_count,
+            legal_count=legal_count,
             is_illegal=is_illegal
         )
         db.add(record)
@@ -67,22 +81,27 @@ def save_detection_record(screenshot_path, violation_area, violation_type, is_il
 
 
 # 兼容旧函数名
-def save_illegal_record(illegal_res, mark_img, screenshot_path, violation_area):
+def save_illegal_record(illegal_res, mark_img, screenshot_path, violation_area, illegal_count=None, legal_count=None):
     """保存违规记录（兼容旧代码）"""
-    # 提取违规类型
-    violation_type = "违规" if illegal_res else "合法"
+    # 计算违规车辆数量和合法车辆数量
+    if illegal_count is None:
+        illegal_count = len(illegal_res)
+    if legal_count is None:
+        # 由于我们没有总单车数量，这里暂时将合法数量设为 0，实际应该从检测结果中获取
+        legal_count = 0
+    # 确定是否违规：当违规车辆数量不为0时记为违规，当违规车辆数量为0时记为不违规
+    is_illegal = 1 if illegal_count > 0 else 0
     # 保存记录
-    save_status = save_detection_record(screenshot_path, violation_area, violation_type, is_illegal=1)
+    save_status = save_detection_record(screenshot_path, violation_area, illegal_count, legal_count, is_illegal=is_illegal)
     # 返回状态和结果
     return save_status, f"保存成功：{screenshot_path}"
 
 # ====================== 2. 查询历史记录（增强版） ======================
-def query_record(start_time=None, end_time=None, violation_type=None, violation_area=None, is_illegal=None):
+def query_record(start_time=None, end_time=None, violation_area=None, is_illegal=None):
     """
     查询历史检测记录（支持多条件筛选）
     :param start_time: 开始时间 (datetime对象或字符串)
     :param end_time: 结束时间 (datetime对象或字符串)
-    :param violation_type: 违规类型（如"人行道"、"消防通道"、"合法"等）
     :param violation_area: 违规区域（场景名称）
     :param is_illegal: 是否违规（0=合法, 1=违规, None=全部）
     :return: 检测记录列表
@@ -101,10 +120,6 @@ def query_record(start_time=None, end_time=None, violation_type=None, violation_
             if isinstance(end_time, str):
                 end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
             query = query.filter(ViolationRecord.detect_time <= end_time)
-        
-        # 按违规类型筛选
-        if violation_type:
-            query = query.filter(ViolationRecord.violation_type == violation_type)
         
         # 按违规区域筛选
         if violation_area:
@@ -130,9 +145,7 @@ def query_by_time_range(start_time, end_time):
     return query_record(start_time=start_time, end_time=end_time)
 
 
-def query_by_violation_type(violation_type):
-    """按违规类型查询违规记录"""
-    return query_record(violation_type=violation_type)
+
 
 
 def query_by_violation_area(violation_area):
@@ -162,18 +175,15 @@ def get_detection_statistics(start_time=None, end_time=None):
         records = query.all()
         
         # 统计各类型检测数量
-        type_count = {}
         area_count = {}
         legality_count = {0: 0, 1: 0}  # 0=合法, 1=违规
         
         for r in records:
-            type_count[r.violation_type] = type_count.get(r.violation_type, 0) + 1
             area_count[r.violation_area] = area_count.get(r.violation_area, 0) + 1
             legality_count[r.is_illegal] = legality_count.get(r.is_illegal, 0) + 1
         
         return {
             "total_count": len(records),
-            "type_statistics": type_count,
             "area_statistics": area_count,
             "legality_statistics": {
                 "合法": legality_count.get(0, 0),
@@ -222,6 +232,52 @@ def clear_all_records():
     finally:
         db.close()
 
+# ====================== 7. 保存反馈记录 ======================
+def save_feedback(record_id, feedback_type, feedback_reason=None):
+    """
+    保存反馈记录
+    :param record_id: 关联的违规记录ID
+    :param feedback_type: 反馈类型（如"误报"、"漏报"等）
+    :param feedback_reason: 反馈原因（可选）
+    :return: 是否保存成功
+    """
+    db = SessionLocal()
+    try:
+        feedback = FeedbackRecord(
+            record_id=record_id,
+            feedback_type=feedback_type,
+            feedback_reason=feedback_reason,
+            feedback_time=datetime.now()
+        )
+        db.add(feedback)
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"保存反馈失败: {e}")
+        return False
+    finally:
+        db.close()
+
+# ====================== 8. 查询反馈记录 ======================
+def query_feedback(record_id=None):
+    """
+    查询反馈记录
+    :param record_id: 关联的违规记录ID（可选）
+    :return: 反馈记录列表
+    """
+    db = SessionLocal()
+    try:
+        query = db.query(FeedbackRecord)
+        
+        if record_id:
+            query = query.filter(FeedbackRecord.record_id == record_id)
+        
+        # 按时间倒序排列（最新的在前）
+        return query.order_by(FeedbackRecord.feedback_time.desc()).all()
+    finally:
+        db.close()
+
 # ====================== 3. 导出【历史违规记录】到 Excel ======================
 def export_to_excel(save_path=None):
     """
@@ -238,7 +294,9 @@ def export_to_excel(save_path=None):
             "ID": r.id,
             "检测时间": r.detect_time.strftime("%Y-%m-%d %H:%M:%S"),
             "违规区域": r.violation_area,
-            "违规类型": r.violation_type,
+            "违规车辆数量": r.illegal_count,
+            "合法停放车辆数量": r.legal_count,
+            "是否违规": "是" if r.is_illegal == 1 else "否",
             "截图路径": r.screenshot_path
         })
 
@@ -310,7 +368,9 @@ def export_query_results_to_excel(records, save_path=None):
             "ID": r.id,
             "检测时间": r.detect_time.strftime("%Y-%m-%d %H:%M:%S"),
             "违规区域": r.violation_area,
-            "违规类型": r.violation_type,
+            "违规车辆数量": r.illegal_count,
+            "合法停放车辆数量": r.legal_count,
+            "是否违规": "是" if r.is_illegal == 1 else "否",
             "截图路径": r.screenshot_path,
             "创建时间": r.create_time.strftime("%Y-%m-%d %H:%M:%S") if r.create_time else "",
         })
@@ -335,26 +395,17 @@ def export_statistics_to_excel(statistics, save_path=None):
     with pd.ExcelWriter(save_path, engine='openpyxl') as writer:
         # Sheet 1: 总体统计
         summary_data = {
-            "统计项": ["总违规次数"],
+            "统计项": ["总检测次数"],
             "数值": [statistics.get("total_count", 0)]
         }
         pd.DataFrame(summary_data).to_excel(writer, sheet_name='总体统计', index=False)
         
-        # Sheet 2: 按类型统计
-        type_stats = statistics.get("type_statistics", {})
-        if type_stats:
-            type_data = {
-                "违规类型": list(type_stats.keys()),
-                "违规次数": list(type_stats.values())
-            }
-            pd.DataFrame(type_data).to_excel(writer, sheet_name='按类型统计', index=False)
-        
-        # Sheet 3: 按区域统计
+        # Sheet 2: 按区域统计
         area_stats = statistics.get("area_statistics", {})
         if area_stats:
             area_data = {
                 "违规区域": list(area_stats.keys()),
-                "违规次数": list(area_stats.values())
+                "检测次数": list(area_stats.values())
             }
             pd.DataFrame(area_data).to_excel(writer, sheet_name='按区域统计', index=False)
 

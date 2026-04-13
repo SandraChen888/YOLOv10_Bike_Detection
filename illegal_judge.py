@@ -23,11 +23,12 @@ def calculate_overlap(box1, box2):
     return inter_area / box1_area if box1_area > 0 else 0.0
 
 
-def judge_illegal(detect_res, img):
+def judge_illegal(detect_res, img, overlap_thresh=0.65):
     """
     违规判定核心函数
     :param detect_res: 检测结果（来自bike_detect）
     :param img: 检测后的图片
+    :param overlap_thresh: 重叠占比阈值，默认为0.65
     :return: 违规结果（列表）、标记违规后的图片
     """
     illegal_res = []
@@ -52,7 +53,7 @@ def judge_illegal(detect_res, img):
         # 检查是否在黄格子内（允许停放区域）
         for grid_box in yellow_grids:
             overlap = calculate_overlap(bike_box, grid_box)
-            if overlap >= 0.65:  # 自行车65%以上在黄格子内视为合规
+            if overlap >= overlap_thresh:  # 自行车超过阈值在黄格子内视为合规
                 is_illegal = False
                 illegal_type = ""
                 max_overlap = overlap
@@ -67,13 +68,25 @@ def judge_illegal(detect_res, img):
                 "违规类型": illegal_type,
                 "重叠占比": max_overlap
             })
-            # 画违规框（黄色，线宽3）+ 标注违规类型
+            # 画违规框（黄色，线宽3）+ 标注违规类型和置信度
             cv2.rectangle(img_copy, (x1, y1), (x2, y2), (0, 255, 255), 3)
+            # 显示置信度
+            cv2.putText(img_copy, f"Conf: {conf:.2f}", (x1, y1 - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            # 显示违规类型
             cv2.putText(img_copy, f"Illegal: {illegal_type}", (x1, y1 - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            # 当置信度较低时，显示警告
+            if conf < 0.5:
+                cv2.putText(img_copy, "Low Confidence! Check lighting/occlusion", (x1, y1 - 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         else:
-            # 合规单车（绿色框）
+            # 合规单车（绿色框）+ 显示置信度
             cv2.rectangle(img_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # 显示置信度
+            cv2.putText(img_copy, f"Conf: {conf:.2f}", (x1, y1 - 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # 显示合规信息
             cv2.putText(img_copy, "Legal", (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 

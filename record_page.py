@@ -61,25 +61,7 @@ class RecordPage(QWidget):
         time_layout.addWidget(time_label)
         time_layout.addWidget(time_btn)
         
-        # 按违规类型查询
-        type_filter = QWidget()
-        type_layout = QVBoxLayout(type_filter)
-        type_label = QLabel("按违规类型")
-        type_label.setStyleSheet("QLabel { font-size: 16px; font-weight: 600; color: #2c3e50; margin-bottom: 10px; }")
-        type_btn = QPushButton("选择违规类型")
-        type_btn.setStyleSheet("""
-            QPushButton {
-                padding: 10px 20px;
-                background-color: #722ed1;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 15px;
-            }
-        """)
-        type_btn.clicked.connect(lambda: self._do_query("type"))
-        type_layout.addWidget(type_label)
-        type_layout.addWidget(type_btn)
+
         
         # 按区域查询
         area_filter = QWidget()
@@ -122,7 +104,6 @@ class RecordPage(QWidget):
         all_layout.addWidget(all_btn)
         
         filter_layout.addWidget(time_filter)
-        filter_layout.addWidget(type_filter)
         filter_layout.addWidget(area_filter)
         filter_layout.addWidget(all_filter)
         filter_layout.addStretch()
@@ -142,9 +123,9 @@ class RecordPage(QWidget):
         
         # 记录表格
         self.record_table = QTableWidget()
-        self.record_table.setColumnCount(7)
+        self.record_table.setColumnCount(9)
         self.record_table.setHorizontalHeaderLabels([
-            "ID", "检测时间", "检测区域", "违规类型", "是否违规", "创建时间", "更新时间"
+            "ID", "检测时间", "检测区域", "违规车辆数量", "合法停放车辆数量", "是否违规", "创建时间", "更新时间", "操作"
         ])
         
         header = self.record_table.horizontalHeader()
@@ -230,7 +211,7 @@ class RecordPage(QWidget):
         """执行记录查询"""
         try:
             from record_manage import (
-                query_record, query_by_time_range, query_by_violation_type,
+                query_record, query_by_time_range,
                 query_by_violation_area, get_detection_statistics
             )
             
@@ -250,14 +231,7 @@ class RecordPage(QWidget):
                     )
                     if ok2:
                         self.current_records = query_by_time_range(start_time, end_time)
-            elif query_type == "type":
-                violation_type, ok = QInputDialog.getItem(
-                    self, "类型查询", "请选择违规类型:",
-                    ["人行道", "教学楼门口", "消防通道", "绿化带", "其他", "合法"],
-                    editable=True
-                )
-                if ok and violation_type:
-                    self.current_records = query_by_violation_type(violation_type)
+
             elif query_type == "area":
                 violation_area, ok = QInputDialog.getText(
                     self, "区域查询", "请输入违规区域（如：教学楼A栋、一饭堂门口）:"
@@ -284,7 +258,8 @@ class RecordPage(QWidget):
                 record.detect_time.strftime("%Y-%m-%d %H:%M:%S")
             ))
             self.record_table.setItem(row_idx, 2, QTableWidgetItem(record.violation_area))
-            self.record_table.setItem(row_idx, 3, QTableWidgetItem(record.violation_type))
+            self.record_table.setItem(row_idx, 3, QTableWidgetItem(str(record.illegal_count)))
+            self.record_table.setItem(row_idx, 4, QTableWidgetItem(str(record.legal_count)))
             
             is_illegal_item = QTableWidgetItem("违规" if record.is_illegal == 1 else "合法")
             if record.is_illegal == 1:
@@ -292,13 +267,32 @@ class RecordPage(QWidget):
             else:
                 is_illegal_item.setForeground(QColor("#52c41a"))
             is_illegal_item.setTextAlignment(Qt.AlignCenter)
-            self.record_table.setItem(row_idx, 4, is_illegal_item)
+            self.record_table.setItem(row_idx, 5, is_illegal_item)
             
             create_time_str = record.create_time.strftime("%Y-%m-%d %H:%M:%S") if record.create_time else "-"
-            self.record_table.setItem(row_idx, 5, QTableWidgetItem(create_time_str))
+            self.record_table.setItem(row_idx, 6, QTableWidgetItem(create_time_str))
             
             update_time_str = record.update_time.strftime("%Y-%m-%d %H:%M:%S") if record.update_time else "-"
-            self.record_table.setItem(row_idx, 6, QTableWidgetItem(update_time_str))
+            self.record_table.setItem(row_idx, 7, QTableWidgetItem(update_time_str))
+            
+            # 添加误报反馈按钮
+            feedback_btn = QPushButton("误报反馈")
+            feedback_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 6px 12px;
+                    background-color: #ff7875;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #ff4d4f;
+                }
+            """)
+            # 绑定按钮点击事件，传递记录ID
+            feedback_btn.clicked.connect(lambda _, r=record: self._handle_feedback(r))
+            self.record_table.setCellWidget(row_idx, 8, feedback_btn)
     
     def _export_selected_records(self):
         """导出选中的记录"""
@@ -322,3 +316,41 @@ class RecordPage(QWidget):
                 QMessageBox.information(self, "导出成功", f"选中记录已导出至：{save_path}")
             except Exception as e:
                 QMessageBox.warning(self, "导出错误", f"导出失败：{str(e)}")
+    
+    def _handle_feedback(self, record):
+        """处理误报反馈"""
+        # 显示反馈对话框，让管理人员输入反馈信息
+        feedback_reason, ok = QInputDialog.getMultiLineText(
+            self, "误报反馈",
+            f"请输入对记录 ID: {record.id} 的反馈原因：",
+            ""
+        )
+        
+        if ok and feedback_reason:
+            try:
+                # 打印调试信息
+                print(f"准备保存反馈：记录ID={record.id}, 类型=误报, 原因={feedback_reason}")
+                
+                # 保存反馈信息到数据库
+                from record_manage import save_feedback
+                save_status = save_feedback(
+                    record_id=record.id,
+                    feedback_type="误报",
+                    feedback_reason=feedback_reason
+                )
+                
+                print(f"保存反馈结果：{save_status}")
+                
+                if save_status:
+                    # 显示成功消息
+                    QMessageBox.information(self, "反馈成功", "误报反馈已提交，感谢您的反馈！")
+                    # 刷新记录列表
+                    self._do_query("all")
+                else:
+                    QMessageBox.warning(self, "反馈错误", "反馈保存失败，请稍后重试！")
+                
+            except Exception as e:
+                print(f"反馈保存异常：{str(e)}")
+                QMessageBox.warning(self, "反馈错误", f"反馈提交失败：{str(e)}")
+        elif ok and not feedback_reason:
+            QMessageBox.warning(self, "提示", "请输入反馈原因！")
