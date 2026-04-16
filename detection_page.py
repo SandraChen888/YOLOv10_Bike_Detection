@@ -45,7 +45,7 @@ class DetectionPage(QWidget):
         title_label = QLabel("操作空间")
         title_label.setStyleSheet("""
             QLabel {
-                font-size: 22px;
+                font-size: 24px;
                 font-weight: bold;
                 color: #2c3e50;
                 margin-bottom: 30px;
@@ -59,7 +59,7 @@ class DetectionPage(QWidget):
         upload_label = QLabel("文件上传")
         upload_label.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 12px;
@@ -154,7 +154,7 @@ class DetectionPage(QWidget):
         scene_label = QLabel("场景选择")
         scene_label.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 12px;
@@ -179,7 +179,7 @@ class DetectionPage(QWidget):
                 border-radius: 10px;
                 background-color: white;
                 selection-background-color: #e8f4ff;
-                font-size: 17px;
+                font-size: 19px;
             }
             QComboBox:hover {
                 border-color: #c6e2ff;
@@ -195,7 +195,7 @@ class DetectionPage(QWidget):
         param_label = QLabel("检测参数")
         param_label.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 12px;
@@ -207,16 +207,43 @@ class DetectionPage(QWidget):
         conf_layout = QHBoxLayout()
         conf_layout.setSpacing(12)
         conf_label = QLabel("置信度：")
-        conf_label.setStyleSheet("color: #666; font-size: 17px;")
+        conf_label.setStyleSheet("color: #666; font-size: 19px;")
         self.conf_slider = QSlider(Qt.Horizontal)
         self.conf_slider.setRange(0, 100)
         self.conf_slider.setValue(50)  # 默认0.5
+        self.conf_slider.setMinimumWidth(100)  # 设置最小宽度
+        self.conf_slider.setStyleSheet("""
+            QSlider {
+                height: 8px;
+                min-width: 100px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #dcdfe6;
+                height: 6px;
+                background: #f0f2f5;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4096ff;
+                border: 2px solid white;
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                margin: -7px 0;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #66b1ff;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #3385ff;
+            }
+        """)
         self.conf_label = QLabel("0.5")
         self.conf_label.setStyleSheet("""
             QLabel {
                 color: #4096ff;
                 font-weight: 600;
-                font-size: 17px;
+                font-size: 19px;
                 min-width: 50px;
                 text-align: center;
             }
@@ -232,16 +259,43 @@ class DetectionPage(QWidget):
         iou_layout = QHBoxLayout()
         iou_layout.setSpacing(12)
         iou_label = QLabel("IOU阈值：")
-        iou_label.setStyleSheet("color: #666; font-size: 17px;")
+        iou_label.setStyleSheet("color: #666; font-size: 19px;")
         self.iou_slider = QSlider(Qt.Horizontal)
         self.iou_slider.setRange(0, 100)
         self.iou_slider.setValue(45)  # 默认0.45
+        self.iou_slider.setMinimumWidth(100)  # 设置最小宽度
+        self.iou_slider.setStyleSheet("""
+            QSlider {
+                height: 8px;
+                min-width: 100px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #dcdfe6;
+                height: 6px;
+                background: #f0f2f5;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4096ff;
+                border: 2px solid white;
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                margin: -7px 0;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #66b1ff;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #3385ff;
+            }
+        """)
         self.iou_label = QLabel("0.45")
         self.iou_label.setStyleSheet("""
             QLabel {
                 color: #4096ff;
                 font-weight: 600;
-                font-size: 17px;
+                font-size: 19px;
                 min-width: 50px;
                 text-align: center;
             }
@@ -253,30 +307,7 @@ class DetectionPage(QWidget):
         left_layout.addLayout(iou_layout)
         left_layout.addSpacing(12)
 
-        # 重叠占比阈值滑块
-        overlap_layout = QHBoxLayout()
-        overlap_layout.setSpacing(12)
-        overlap_label = QLabel("重叠阈值：")
-        overlap_label.setStyleSheet("color: #666; font-size: 17px;")
-        self.overlap_slider = QSlider(Qt.Horizontal)
-        self.overlap_slider.setRange(0, 100)
-        self.overlap_slider.setValue(65)  # 默认0.65
-        self.overlap_label = QLabel("0.65")
-        self.overlap_label.setStyleSheet("""
-            QLabel {
-                color: #4096ff;
-                font-weight: 600;
-                font-size: 17px;
-                min-width: 50px;
-                text-align: center;
-            }
-        """)
-        self.overlap_slider.valueChanged.connect(lambda v: self.overlap_label.setText(str(v / 100)))
-        overlap_layout.addWidget(overlap_label)
-        overlap_layout.addWidget(self.overlap_slider)
-        overlap_layout.addWidget(self.overlap_label)
-        left_layout.addLayout(overlap_layout)
-        left_layout.addSpacing(12)
+
 
         # 数据源选择（隐藏在操作区）
         self.source_combo = QComboBox()
@@ -288,7 +319,7 @@ class DetectionPage(QWidget):
                 border-radius: 8px;
                 background-color: white;
                 selection-background-color: #e8f4ff;
-                font-size: 15px;
+                font-size: 17px;
             }
         """)
         self.source_combo.hide()  # 隐藏，通过按钮控制
@@ -299,7 +330,7 @@ class DetectionPage(QWidget):
         self.camera_index_widget = QWidget()
         self.camera_index_layout = QHBoxLayout(self.camera_index_widget)
         camera_index_label = QLabel("摄像头索引：")
-        camera_index_label.setStyleSheet("color: #666; font-size: 15px;")
+        camera_index_label.setStyleSheet("color: #666; font-size: 17px;")
         self.camera_index_combo = QComboBox()
         self.camera_index_combo.addItems(["0 (默认)", "1", "2", "3"])
         self.camera_index_combo.setStyleSheet("""
@@ -309,7 +340,7 @@ class DetectionPage(QWidget):
                 border-radius: 8px;
                 background-color: white;
                 selection-background-color: #e8f4ff;
-                font-size: 15px;
+                font-size: 17px;
             }
         """)
         self.camera_index_layout.addWidget(camera_index_label)
@@ -339,7 +370,7 @@ class DetectionPage(QWidget):
         action_label = QLabel("操作控制")
         action_label.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 12px;
@@ -468,7 +499,7 @@ class DetectionPage(QWidget):
         visual_label = QLabel("核心可视化展示")
         visual_label.setStyleSheet("""
             QLabel {
-                font-size: 20px;
+                font-size: 22px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 15px;
@@ -480,7 +511,7 @@ class DetectionPage(QWidget):
         self.fps_display = QLabel("FPS: 0.00")
         self.fps_display.setStyleSheet("""
             QLabel {
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: 600;
                 color: #4096ff;
                 background-color: #f8f9fa;
@@ -535,7 +566,7 @@ class DetectionPage(QWidget):
         self.image_index_label = QLabel("0/0")
         self.image_index_label.setStyleSheet("""
             QLabel {
-                font-size: 14px;
+                font-size: 16px;
                 color: #666;
                 margin: 0 10px;
             }
@@ -554,7 +585,7 @@ class DetectionPage(QWidget):
                 border-radius: 12px;
                 background-color: #f8f9fa;
                 color: #909399;
-                font-size: 17px;
+                font-size: 19px;
             }
         """)
         self.result_display.setAlignment(Qt.AlignCenter)
@@ -574,7 +605,7 @@ class DetectionPage(QWidget):
         stats_label = QLabel("检测结果统计")
         stats_label.setStyleSheet("""
             QLabel {
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 12px;
@@ -608,14 +639,14 @@ class DetectionPage(QWidget):
             stat_label = QLabel(label)
             stat_label.setStyleSheet("""
                 QLabel {
-                    font-size: 16px;
+                    font-size: 18px;
                     color: #666;
                     margin-bottom: 8px;
                 }
             """)
             
             stat_value = QLabel(value)
-            stat_value.setStyleSheet(f"QLabel {{ font-size: 24px; font-weight: bold; color: {color}; }}")
+            stat_value.setStyleSheet(f"QLabel {{ font-size: 26px; font-weight: bold; color: {color}; }}")
             
             stats_card_layout.addWidget(stat_label, i, 0)
             stats_card_layout.addWidget(stat_value, i, 1)
@@ -638,7 +669,7 @@ class DetectionPage(QWidget):
         log_label = QLabel("系统日志")
         log_label.setStyleSheet("""
             QLabel {
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: 600;
                 color: #2c3e50;
                 margin-bottom: 10px;
@@ -655,7 +686,7 @@ class DetectionPage(QWidget):
                 border-radius: 12px;
                 background-color: #f8f9fa;
                 padding: 15px;
-                font-size: 14px;
+                font-size: 16px;
                 color: #333;
             }
         """)
@@ -679,16 +710,25 @@ class DetectionPage(QWidget):
         if source_type == "image":
             self.source_combo.setCurrentIndex(0)  # 本地图片
             self._select_source()
+            # 隐藏摄像头索引选择
+            self.camera_index_widget.hide()
         elif source_type == "video":
             self.source_combo.setCurrentIndex(2)  # 本地视频
             self._select_source()
+            # 隐藏摄像头索引选择
+            self.camera_index_widget.hide()
         elif source_type == "batch":
             self.source_combo.setCurrentIndex(1)  # 批量图片
             self._select_source()
+            # 隐藏摄像头索引选择
+            self.camera_index_widget.hide()
         elif source_type == "camera":
             self.source_combo.setCurrentIndex(3)  # 摄像头实时
             self.source_path = "camera"
+            # 显示摄像头索引选择
+            self.camera_index_widget.show()
             self.log_display.append("✅ 已选择摄像头作为数据源")
+            self.log_display.append("📷 请选择正确的摄像头索引")
     
     def _select_source(self):
         """选择图片/视频文件"""
@@ -746,8 +786,8 @@ class DetectionPage(QWidget):
         # 获取当前场景
         current_scene = self.scene_combo.currentText()
 
-        # 获取重叠阈值
-        overlap_thres = self.overlap_slider.value() / 100
+        # 使用默认重叠阈值0.65
+        overlap_thres = 0.65
 
         # 启动检测线程
         self.detection_thread = DetectionThread(

@@ -19,7 +19,6 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from detection_thread import DetectionThread
 from detection_page import DetectionPage
-from test_page import TestPage
 from record_page import RecordPage
 
 class BikeDetectionUI(QMainWindow):
@@ -49,14 +48,12 @@ class BikeDetectionUI(QMainWindow):
         self.stacked_widget = QStackedWidget()
         self.main_layout.addWidget(self.stacked_widget)
         
-        # 创建三个页面
+        # 创建两个页面
         self.detection_page = DetectionPage(self)
-        self.test_page = TestPage(self)
         self.record_page = RecordPage(self)
         
         # 添加页面到QStackedWidget
         self.stacked_widget.addWidget(self.detection_page)
-        self.stacked_widget.addWidget(self.test_page)
         self.stacked_widget.addWidget(self.record_page)
     
     def _create_menu_bar(self):
@@ -81,13 +78,6 @@ class BikeDetectionUI(QMainWindow):
         detect_btn.clicked.connect(lambda: self._switch_page("detection"))
         nav_layout.addWidget(detect_btn)
         self.nav_buttons.append(detect_btn)
-        
-        # 系统测试页面按钮
-        test_btn = QPushButton("系统测试")
-        test_btn.setStyleSheet(self._get_nav_button_style())
-        test_btn.clicked.connect(lambda: self._switch_page("test"))
-        nav_layout.addWidget(test_btn)
-        self.nav_buttons.append(test_btn)
         
         # 记录管理页面按钮
         record_btn = QPushButton("记录管理")
@@ -153,9 +143,7 @@ class BikeDetectionUI(QMainWindow):
         for i, btn in enumerate(self.nav_buttons):
             if i == 0 and page_name == "detection":
                 btn.setStyleSheet(self._get_nav_button_active_style())
-            elif i == 1 and page_name == "test":
-                btn.setStyleSheet(self._get_nav_button_active_style())
-            elif i == 2 and page_name == "record":
+            elif i == 1 and page_name == "record":
                 btn.setStyleSheet(self._get_nav_button_active_style())
             else:
                 btn.setStyleSheet(self._get_nav_button_style())
@@ -163,10 +151,8 @@ class BikeDetectionUI(QMainWindow):
         # 切换到对应页面
         if page_name == "detection":
             self.stacked_widget.setCurrentIndex(0)
-        elif page_name == "test":
-            self.stacked_widget.setCurrentIndex(1)
         elif page_name == "record":
-            self.stacked_widget.setCurrentIndex(2)
+            self.stacked_widget.setCurrentIndex(1)
     
 
     

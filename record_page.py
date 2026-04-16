@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                           QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QInputDialog, QFileDialog, QMessageBox)
-from PyQt5.QtCore import Qt
+                           QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QInputDialog, QFileDialog, QMessageBox, QComboBox, QDialog, QSizePolicy)
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor
 from datetime import datetime
 
@@ -61,8 +61,6 @@ class RecordPage(QWidget):
         time_layout.addWidget(time_label)
         time_layout.addWidget(time_btn)
         
-
-        
         # 按区域查询
         area_filter = QWidget()
         area_layout = QVBoxLayout(area_filter)
@@ -113,59 +111,67 @@ class RecordPage(QWidget):
         # 违规记录列表
         record_card = QWidget()
         record_layout = QVBoxLayout(record_card)
-        record_card.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border-radius: 12px;
-                padding: 25px;
-            }
-        """)
         
-        # 记录表格
-        self.record_table = QTableWidget()
-        self.record_table.setColumnCount(9)
+        # 记录表格 - 直接指定行数和列数
+        self.record_table = QTableWidget(0, 9)
+        
+        # 设置表头标签
         self.record_table.setHorizontalHeaderLabels([
             "ID", "检测时间", "检测区域", "违规车辆数量", "合法停放车辆数量", "是否违规", "创建时间", "更新时间", "操作"
         ])
         
+        # 获取表头对象
         header = self.record_table.horizontalHeader()
+        
+        # 设置表头属性
+        header.setMinimumHeight(50)
+        header.setDefaultAlignment(Qt.AlignCenter)
+        
+        # 设置表头样式，确保字体颜色为黑色
         header.setStyleSheet("""
             QHeaderView::section {
-                background-color: #4096ff;
-                color: white;
-                padding: 12px;
-                border: none;
-                font-weight: 600;
-                font-size: 15px;
-            }
-        """)
-        header.setSectionResizeMode(0)
-        
-        self.record_table.setStyleSheet("""
-            QTableWidget {
                 background-color: white;
-                border: 1px solid #e5e9f0;
-                border-radius: 10px;
-                gridline-color: #f0f2f5;
+                color: black;
+                font-weight: bold;
                 font-size: 14px;
-            }
-            QTableWidget::item {
-                padding: 12px;
-                border-bottom: 1px solid #f0f2f5;
-            }
-            QTableWidget::item:selected {
-                background-color: #e8f4ff;
-                color: #2c3e50;
-            }
-            QTableWidget::alternate-row {
-                background-color: #f8f9fa;
+                padding: 4px;
+                border: 1px solid #dcdfe6;
             }
         """)
+        
+        # 设置列宽
+        # 固定列宽
+        self.record_table.setColumnWidth(0, 60)  # ID列
+        self.record_table.setColumnWidth(3, 100)  # 违规车辆数量
+        self.record_table.setColumnWidth(4, 100)  # 合法停放车辆数量
+        self.record_table.setColumnWidth(8, 100)  # 操作列
+        
+        # 拉伸列宽
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # 检测时间
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # 检测区域
+        header.setSectionResizeMode(5, QHeaderView.Stretch)  # 是否违规
+        header.setSectionResizeMode(6, QHeaderView.Stretch)  # 创建时间
+        header.setSectionResizeMode(7, QHeaderView.Stretch)  # 更新时间
+        
+        # 设置表格属性
+        self.record_table.setShowGrid(True)
         self.record_table.setAlternatingRowColors(True)
         self.record_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.record_table.setEditTriggers(QTableWidget.NoEditTriggers)
         
-        record_layout.addWidget(self.record_table, 5)
+        # 确保表格有足够的空间
+        self.record_table.setMinimumSize(1000, 500)
+        self.record_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # 保存表头对象
+        self.header = header
+        
+        # 调试信息
+        print(f"表头可见性: {header.isVisible()}")
+        print(f"表头高度: {header.height()}")
+        print(f"表头最小高度: {header.minimumHeight()}")
+        print(f"表格行数: {self.record_table.rowCount()}")
+        print(f"表格列数: {self.record_table.columnCount()}")
         
         # 底部操作按钮
         bottom_layout = QHBoxLayout()
@@ -184,6 +190,21 @@ class RecordPage(QWidget):
         self.export_btn.clicked.connect(self._export_selected_records)
         self.export_btn.setEnabled(False)
         
+        delete_btn = QPushButton("删除选中记录")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                padding: 12px 24px;
+                background-color: #f56c6c;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 16px;
+            }
+        """)
+        delete_btn.clicked.connect(self._delete_selected_records)
+        delete_btn.setEnabled(False)
+        
         refresh_btn = QPushButton("刷新记录")
         refresh_btn.setStyleSheet("""
             QPushButton {
@@ -199,13 +220,40 @@ class RecordPage(QWidget):
         refresh_btn.clicked.connect(lambda: self._do_query("all"))
         
         bottom_layout.addWidget(self.export_btn)
+        bottom_layout.addWidget(delete_btn)
         bottom_layout.addWidget(refresh_btn)
         bottom_layout.addStretch()
+        
+        # 保存删除按钮引用
+        self.delete_btn = delete_btn
+        
+        # 添加表格到布局
+        record_layout.addWidget(self.record_table)
         record_layout.addLayout(bottom_layout)
         
-        layout.addWidget(record_card, 3)
+        # 添加到主布局
+        layout.addWidget(record_card)
         
-        return self
+        # 使用定时器延迟设置表头可见性，确保UI初始化完成
+        QTimer.singleShot(100, self._ensure_header_visible)
+        
+    def _ensure_header_visible(self):
+        """确保表头可见"""
+        if hasattr(self, 'header'):
+            self.header.setVisible(True)
+            print(f"定时器设置后表头可见性: {self.header.isVisible()}")
+            # 再次设置表头样式
+            self.header.setStyleSheet("""
+                QHeaderView::section {
+                    background-color: white;
+                    color: black;
+                    font-weight: bold;
+                    font-size: 14px;
+                    padding: 4px;
+                    border: 1px solid #dcdfe6;
+                }
+            """)
+            print(f"定时器设置后表头样式已更新")
     
     def _do_query(self, query_type):
         """执行记录查询"""
@@ -233,11 +281,105 @@ class RecordPage(QWidget):
                         self.current_records = query_by_time_range(start_time, end_time)
 
             elif query_type == "area":
-                violation_area, ok = QInputDialog.getText(
-                    self, "区域查询", "请输入违规区域（如：教学楼A栋、一饭堂门口）:"
-                )
-                if ok and violation_area:
-                    self.current_records = query_by_violation_area(violation_area)
+                # 创建自定义对话框
+                dialog = QDialog(self)
+                dialog.setWindowTitle("区域查询")
+                dialog.setGeometry(100, 100, 400, 150)
+                dialog.setStyleSheet("""
+                    QDialog {
+                        background-color: white;
+                        border-radius: 12px;
+                        padding: 20px;
+                    }
+                """)
+                
+                layout = QVBoxLayout(dialog)
+                
+                label = QLabel("请选择违规区域：")
+                label.setStyleSheet("QLabel { font-size: 18px; font-weight: 600; color: #2c3e50; margin-bottom: 15px; }")
+                layout.addWidget(label)
+                
+                # 创建场景选择下拉框
+                combo = QComboBox()
+                combo.addItems([
+                    "默认场景",
+                    "教学楼A栋",
+                    "教学楼B栋",
+                    "教学楼C栋",
+                    "教学楼D栋",
+                    "教学楼E栋",
+                    "教学楼F栋",
+                    "一饭堂门口"
+                ])
+                combo.setStyleSheet("""
+                    QComboBox {
+                        padding: 14px 18px;
+                        border: 2px solid #e5e9f0;
+                        border-radius: 10px;
+                        background-color: white;
+                        selection-background-color: #e8f4ff;
+                        font-size: 19px;
+                    }
+                    QComboBox:hover {
+                        border-color: #c6e2ff;
+                    }
+                    QComboBox:focus {
+                        border-color: #4096ff;
+                    }
+                """)
+                layout.addWidget(combo)
+                
+                # 按钮布局
+                btn_layout = QHBoxLayout()
+                ok_btn = QPushButton("确定")
+                ok_btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 12px 24px;
+                        background-color: #4096ff;
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        font-size: 16px;
+                    }
+                """)
+                cancel_btn = QPushButton("取消")
+                cancel_btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 12px 24px;
+                        background-color: #909399;
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        font-size: 16px;
+                    }
+                """)
+                btn_layout.addStretch()
+                btn_layout.addWidget(ok_btn)
+                btn_layout.addWidget(cancel_btn)
+                layout.addLayout(btn_layout)
+                
+                # 存储选择结果
+                selected_area = None
+                
+                def on_ok():
+                    nonlocal selected_area
+                    selected_area = combo.currentText()
+                    dialog.close()
+                
+                def on_cancel():
+                    dialog.close()
+                
+                ok_btn.clicked.connect(on_ok)
+                cancel_btn.clicked.connect(on_cancel)
+                
+                # 显示对话框
+                dialog.exec_()
+                
+                # 执行查询
+                if selected_area and selected_area != "默认场景":
+                    self.current_records = query_by_violation_area(selected_area)
             
             # 显示记录
             self._display_records(self.current_records)
@@ -249,6 +391,7 @@ class RecordPage(QWidget):
         """显示记录到表格"""
         self.record_table.setRowCount(0)
         self.export_btn.setEnabled(len(records) > 0)
+        self.delete_btn.setEnabled(len(records) > 0)
         
         for row_idx, record in enumerate(records):
             self.record_table.insertRow(row_idx)
@@ -317,6 +460,48 @@ class RecordPage(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "导出错误", f"导出失败：{str(e)}")
     
+    def _delete_selected_records(self):
+        """删除选中的记录"""
+        selected_rows = set()
+        for item in self.record_table.selectedItems():
+            selected_rows.add(item.row())
+        
+        if not selected_rows:
+            QMessageBox.information(self, "提示", "请先选择要删除的记录！")
+            return
+        
+        # 确认删除
+        reply = QMessageBox.question(
+            self, "删除确认",
+            f"确定要删除选中的 {len(selected_rows)} 条记录吗？此操作不可恢复！",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                from record_manage import delete_record
+                deleted_count = 0
+                # 保存要删除的记录ID
+                record_ids = []
+                for row in selected_rows:
+                    record = self.current_records[row]
+                    record_ids.append(record.id)
+                
+                # 执行删除
+                for record_id in record_ids:
+                    if delete_record(record_id):
+                        deleted_count += 1
+                
+                if deleted_count > 0:
+                    QMessageBox.information(self, "删除成功", f"成功删除 {deleted_count} 条记录！")
+                    # 刷新记录列表
+                    self._do_query("all")
+                else:
+                    QMessageBox.warning(self, "删除错误", "删除失败，请稍后重试！")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "删除错误", f"删除失败：{str(e)}")
+
     def _handle_feedback(self, record):
         """处理误报反馈"""
         # 显示反馈对话框，让管理人员输入反馈信息
@@ -328,9 +513,6 @@ class RecordPage(QWidget):
         
         if ok and feedback_reason:
             try:
-                # 打印调试信息
-                print(f"准备保存反馈：记录ID={record.id}, 类型=误报, 原因={feedback_reason}")
-                
                 # 保存反馈信息到数据库
                 from record_manage import save_feedback
                 save_status = save_feedback(
@@ -338,8 +520,6 @@ class RecordPage(QWidget):
                     feedback_type="误报",
                     feedback_reason=feedback_reason
                 )
-                
-                print(f"保存反馈结果：{save_status}")
                 
                 if save_status:
                     # 显示成功消息
@@ -350,7 +530,6 @@ class RecordPage(QWidget):
                     QMessageBox.warning(self, "反馈错误", "反馈保存失败，请稍后重试！")
                 
             except Exception as e:
-                print(f"反馈保存异常：{str(e)}")
                 QMessageBox.warning(self, "反馈错误", f"反馈提交失败：{str(e)}")
         elif ok and not feedback_reason:
             QMessageBox.warning(self, "提示", "请输入反馈原因！")
