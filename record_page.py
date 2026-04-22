@@ -1,14 +1,35 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                            QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QInputDialog, QFileDialog, QMessageBox, QComboBox, QDialog, QSizePolicy)
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QColor
 from datetime import datetime
+
+
+class QueryThread(QThread):
+    """数据库查询线程"""
+    query_finished = pyqtSignal(list)
+    query_error = pyqtSignal(str)
+
+    def __init__(self, query_func, *args, **kwargs):
+        super().__init__()
+        self.query_func = query_func
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self.query_func(*self.args, **self.kwargs)
+            self.query_finished.emit(result)
+        except Exception as e:
+            self.query_error.emit(str(e))
+
 
 class RecordPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.current_records = []
+        self.query_thread = None
         self._init_ui()
         # 初始化加载全部记录
         self._do_query("all")
@@ -257,135 +278,139 @@ class RecordPage(QWidget):
     
     def _do_query(self, query_type):
         """执行记录查询"""
-        try:
-            from record_manage import (
-                query_record, query_by_time_range,
-                query_by_violation_area, get_detection_statistics
-            )
-            
-            self.current_records = []
-            
-            if query_type == "all":
-                self.current_records = query_record()
-            elif query_type == "time":
-                start_time, ok1 = QInputDialog.getText(
-                    self, "时间查询", "请输入开始时间 (格式: 2024-01-01 00:00:00):",
-                    text=datetime.now().strftime("%Y-%m-%d 00:00:00")
-                )
-                if ok1:
-                    end_time, ok2 = QInputDialog.getText(
-                        self, "时间查询", "请输入结束时间 (格式: 2024-12-31 23:59:59):",
-                        text=datetime.now().strftime("%Y-%m-%d 23:59:59")
-                    )
-                    if ok2:
-                        self.current_records = query_by_time_range(start_time, end_time)
+        from record_manage import (
+            query_record, query_by_time_range,
+            query_by_violation_area, get_detection_statistics
+        )
 
-            elif query_type == "area":
-                # 创建自定义对话框
-                dialog = QDialog(self)
-                dialog.setWindowTitle("区域查询")
-                dialog.setGeometry(100, 100, 400, 150)
-                dialog.setStyleSheet("""
-                    QDialog {
-                        background-color: white;
-                        border-radius: 12px;
-                        padding: 20px;
-                    }
-                """)
-                
-                layout = QVBoxLayout(dialog)
-                
-                label = QLabel("请选择违规区域：")
-                label.setStyleSheet("QLabel { font-size: 18px; font-weight: 600; color: #2c3e50; margin-bottom: 15px; }")
-                layout.addWidget(label)
-                
-                # 创建场景选择下拉框
-                combo = QComboBox()
-                combo.addItems([
-                    "默认场景",
-                    "教学楼A栋",
-                    "教学楼B栋",
-                    "教学楼C栋",
-                    "教学楼D栋",
-                    "教学楼E栋",
-                    "教学楼F栋",
-                    "一饭堂门口"
-                ])
-                combo.setStyleSheet("""
-                    QComboBox {
-                        padding: 14px 18px;
-                        border: 2px solid #e5e9f0;
-                        border-radius: 10px;
-                        background-color: white;
-                        selection-background-color: #e8f4ff;
-                        font-size: 19px;
-                    }
-                    QComboBox:hover {
-                        border-color: #c6e2ff;
-                    }
-                    QComboBox:focus {
-                        border-color: #4096ff;
-                    }
-                """)
-                layout.addWidget(combo)
-                
-                # 按钮布局
-                btn_layout = QHBoxLayout()
-                ok_btn = QPushButton("确定")
-                ok_btn.setStyleSheet("""
-                    QPushButton {
-                        padding: 12px 24px;
-                        background-color: #4096ff;
-                        color: white;
-                        border: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        font-size: 16px;
-                    }
-                """)
-                cancel_btn = QPushButton("取消")
-                cancel_btn.setStyleSheet("""
-                    QPushButton {
-                        padding: 12px 24px;
-                        background-color: #909399;
-                        color: white;
-                        border: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        font-size: 16px;
-                    }
-                """)
-                btn_layout.addStretch()
-                btn_layout.addWidget(ok_btn)
-                btn_layout.addWidget(cancel_btn)
-                layout.addLayout(btn_layout)
-                
-                # 存储选择结果
-                selected_area = None
-                
-                def on_ok():
-                    nonlocal selected_area
-                    selected_area = combo.currentText()
-                    dialog.close()
-                
-                def on_cancel():
-                    dialog.close()
-                
-                ok_btn.clicked.connect(on_ok)
-                cancel_btn.clicked.connect(on_cancel)
-                
-                # 显示对话框
-                dialog.exec_()
-                
-                # 执行查询
-                if selected_area and selected_area != "默认场景":
-                    self.current_records = query_by_violation_area(selected_area)
-            
-            # 显示记录
-            self._display_records(self.current_records)
-            
-        except Exception as e:
-            QMessageBox.warning(self, "查询错误", f"查询失败：{str(e)}")
+        if query_type == "all":
+            self._query_in_background(query_record)
+        elif query_type == "time":
+            start_time, ok1 = QInputDialog.getText(
+                self, "时间查询", "请输入开始时间 (格式: 2024-01-01 00:00:00):",
+                text=datetime.now().strftime("%Y-%m-%d 00:00:00")
+            )
+            if ok1:
+                end_time, ok2 = QInputDialog.getText(
+                    self, "时间查询", "请输入结束时间 (格式: 2024-12-31 23:59:59):",
+                    text=datetime.now().strftime("%Y-%m-%d 23:59:59")
+                )
+                if ok2:
+                    self.current_records = query_by_time_range(start_time, end_time)
+                    self._display_records(self.current_records)
+        elif query_type == "area":
+            dialog = QDialog(self)
+            dialog.setWindowTitle("区域查询")
+            dialog.setGeometry(100, 100, 400, 150)
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: white;
+                    border-radius: 12px;
+                    padding: 20px;
+                }
+            """)
+
+            layout = QVBoxLayout(dialog)
+
+            label = QLabel("请选择违规区域：")
+            label.setStyleSheet("QLabel { font-size: 18px; font-weight: 600; color: #2c3e50; margin-bottom: 15px; }")
+            layout.addWidget(label)
+
+            combo = QComboBox()
+            combo.addItems([
+                "默认场景",
+                "教学楼A栋",
+                "教学楼B栋",
+                "教学楼C栋",
+                "教学楼D栋",
+                "教学楼E栋",
+                "教学楼F栋",
+                "一饭堂门口"
+            ])
+            combo.setStyleSheet("""
+                QComboBox {
+                    padding: 14px 18px;
+                    border: 2px solid #e5e9f0;
+                    border-radius: 10px;
+                    background-color: white;
+                    selection-background-color: #e8f4ff;
+                    font-size: 19px;
+                }
+                QComboBox:hover {
+                    border-color: #c6e2ff;
+                }
+                QComboBox:focus {
+                    border-color: #4096ff;
+                }
+            """)
+            layout.addWidget(combo)
+
+            btn_layout = QHBoxLayout()
+            ok_btn = QPushButton("确定")
+            ok_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 12px 24px;
+                    background-color: #4096ff;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 16px;
+                }
+            """)
+            cancel_btn = QPushButton("取消")
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 12px 24px;
+                    background-color: #909399;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 16px;
+                }
+            """)
+            btn_layout.addStretch()
+            btn_layout.addWidget(ok_btn)
+            btn_layout.addWidget(cancel_btn)
+            layout.addLayout(btn_layout)
+
+            selected_area = [None]
+
+            def on_ok():
+                selected_area[0] = combo.currentText()
+                dialog.close()
+
+            def on_cancel():
+                dialog.close()
+
+            ok_btn.clicked.connect(on_ok)
+            cancel_btn.clicked.connect(on_cancel)
+
+            dialog.exec_()
+
+            if selected_area[0] and selected_area[0] != "默认场景":
+                self.current_records = query_by_violation_area(selected_area[0])
+                self._display_records(self.current_records)
+
+    def _query_in_background(self, query_func, *args, **kwargs):
+        """后台执行数据库查询"""
+        if self.query_thread and self.query_thread.isRunning():
+            return
+
+        self.query_thread = QueryThread(query_func, *args, **kwargs)
+        self.query_thread.query_finished.connect(self._on_query_finished)
+        self.query_thread.query_error.connect(self._on_query_error)
+        self.query_thread.start()
+
+    def _on_query_finished(self, records):
+        """查询完成回调"""
+        self.current_records = records
+        self._display_records(self.current_records)
+
+    def _on_query_error(self, error_msg):
+        """查询错误回调"""
+        QMessageBox.warning(self, "查询错误", f"查询失败：{error_msg}")
     
     def _display_records(self, records):
         """显示记录到表格"""
